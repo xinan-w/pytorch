@@ -15053,7 +15053,7 @@ a")
             pass
 
         def test_simple(x1):  # noqa: F811
-            return x1 + 5
+            return x1
 
         def invoke_function():
             return test_simple(1.0), test_simple(.5)
@@ -15066,6 +15066,18 @@ a")
         for a, b in zip(compiled_fns_1, compiled_fns_2):
             self.assertIs(a, b)
 
+        old_func = test_simple
+
+        # testing that new functions added work with caching
+        @torch.jit._overload  # noqa: F811
+        def test_simple(x1):  # noqa: F811
+            # type: (str) -> str
+            pass
+
+        @torch.jit.script
+        def my_func():
+            return old_func("hi")
+
         # currently we take the default values have to be specified in the
         # overload as well - TODO take them from implementation and apply
         # where the type is valid.
@@ -15073,9 +15085,9 @@ a")
         def identity(x1):  # noqa: F811
             # type: (str) -> str
             pass
-
+        #
         @torch.jit._overload  # noqa: F811
-        def identity(x1=1.0):  # noqa: F811
+        def identity(x1):  # noqa: F811
             # type: (float) -> float
             pass
 
@@ -15121,6 +15133,72 @@ a")
         with self.assertRaisesRegex(Exception, "Arguments for call are not valid"):
             torch.jit.script(test)
 
+        with self.assertRaisesRegex(Exception, "Overloaded default args must be on the implementation function"):
+            @torch.jit._overload  # noqa: F811
+            def default_on_overload(x, y=2):  # noqa: F811
+                # type: (int, int) -> (int)
+                pass
+
+            def default_on_overload(x, y):  # noqa: F811
+                # type: (int, int) -> (int)
+                pass
+
+            @torch.jit.script
+            def test():
+                return default_on_overload(1, 2)
+
+        @torch.jit._overload  # noqa: F811
+        def diff_default(x):  # noqa: F811
+            # type: (int) -> int
+            pass
+
+        @torch.jit._overload  # noqa: F811
+        def diff_default(x):  # noqa: F811
+            # type: (str) -> str
+            pass
+
+        def diff_default(x="hi"):  # noqa: F811
+            return x
+
+        def test():
+            return diff_default(), diff_default(2), diff_default("abc")
+
+        self.assertEqual(test(), torch.jit.script(test)())
+
+        @torch.jit._overload  # noqa: F811
+        def diff_num_params(x):  # noqa: F811
+            # type: (float) -> float
+            pass
+
+        @torch.jit._overload  # noqa: F811
+        def diff_num_params(x, y):  # noqa: F811
+            # type: (int, int) -> int
+            pass
+
+        def diff_num_params(x, y=2, z=3):  # noqa: F811
+            # type: (Union[float, int], int, int)
+            return x + y + z
+
+        def test():
+            return diff_num_params(1.0), diff_num_params(1, 2), diff_num_params(1), diff_num_params(1, 2, 3)
+
+        self.assertEqual(test(), torch.jit.script(test)())
+
+        @torch.jit._overload  # noqa: F811
+        def diff_num_params_no_annot():
+            # type: () -> int
+            pass
+
+        def diff_num_params_no_annot(x=1):    # noqa: F811
+            return x
+
+        def test():
+            return diff_num_params_no_annot(1.0)
+
+        with self.assertRaisesRegex(Exception, "Parameters not specified on the overloaded declaration must have a type annotation"):
+            torch.jit.script(test)
+
+
     def test_function_overloading_isinstance(self):
         @torch.jit._overload  # noqa: F811
         def my_conv(x, y):  # noqa: F811
@@ -15128,7 +15206,7 @@ a")
             pass
 
         @torch.jit._overload  # noqa: F811
-        def my_conv(x, y=2.0):  # noqa: F811
+        def my_conv(x, y):  # noqa: F811
             # type: (float, float) -> (float)
             pass
 
