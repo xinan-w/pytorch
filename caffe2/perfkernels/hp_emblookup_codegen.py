@@ -1,4 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+from typing import List
+from typing import Any
 
 import argparse
 import sys
@@ -7,8 +9,8 @@ import sys
 sizeof = {"float": 4, "at::Half": 2, "uint8_t": 1}
 
 
-def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
-    def compute(regid, InType, use_weights, isa, prefetch):
+def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets) -> List[Any]:
+    def compute(regid, InType, use_weights, isa, prefetch) -> List[Any]:
         code = []
 
         if InType == "float":
@@ -50,11 +52,20 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
 
     code = []
     code.append("    // unrolling " + str(uf) + " times")
-    code.append(
-        "    for ("
-        + IndexType
-        + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
-    )
+
+    if use_offsets:
+        code.append(
+            "    for ("
+            + IndexType
+            + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
+        )
+    else:
+        code.append(
+            "    for ("
+            + IndexType
+            + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
+        )
+
     code.append("      " + OutType + "* op = &out[rangeIndex * block_size];")
     for i in range(0, uf):
         j = 8 * i
@@ -68,9 +79,7 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
             + "      }"
         )
         code.append("""\
-      int64_t end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
+      int64_t end_offset = offsets[rangeIndex + 1];
       int64_t length = end_offset - offsets[rangeIndex];""")
         code.append(
             "      for ("
@@ -179,8 +188,8 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
     return code
 
 
-def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
-    def compute(InType, use_weights, isa):
+def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets) -> List[Any]:
+    def compute(InType, use_weights, isa) -> List[Any]:
         code = []
         if InType == "float":
             code.append(
@@ -222,11 +231,22 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
     code = []
     if InType == "at::Half":
         code.append("    alignas(64) at::Half vtmp1[8] = {0};")
-    code.append(
-        "    for ("
-        + IndexType
-        + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
-    )
+
+
+
+    if use_offsets:
+        code.append(
+            "    for ("
+            + IndexType
+            + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
+        )
+    else:
+        code.append(
+            "    for ("
+            + IndexType
+            + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
+        )
+
     code.append("      " + OutType + "* op = &out[rangeIndex * block_size];")
 
     # initialize to 0
@@ -246,10 +266,8 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
             + "      }"
         )
         code.append("""\
-      int end_offset =
-          (rangeIndex == output_size - 1 ? index_size
-                                         : offsets[rangeIndex + 1]);
-      int length = end_offset - offsets[rangeIndex];""")
+      int64_t end_offset = offsets[rangeIndex + 1];
+      int64_t length = end_offset - offsets[rangeIndex];""")
         code.append(
             "      for ("
             + "int64_t"
@@ -444,6 +462,8 @@ for o in options:
     args.append("    " + OutType + "* out) {")
     code += args
 
+    # code.append("  std::cout << \"" + fn_base + "\" << std::endl;")
+
     code.append("  const " + IndexType + " prefdist_T0 = 16;")
     # block_size is the number of elements and fused_block_size is the size of
     # an entire row, including scale and bias.
@@ -452,7 +472,7 @@ for o in options:
         "  const {} fused_block_size = block_size + {};".format(IndexType, offset)
     )
     if opts.use_offsets:
-        code.append("  int64_t dataInd = 0;")
+        code.append("  int64_t dataInd = offsets[0];")
     else:
         code.append("  " + IndexType + " dataInd = 0;")
 
@@ -470,7 +490,10 @@ for o in options:
     code.append("    // generic code")
     code += generic(IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets)
     code.append("  }")
-    code.append("  return dataInd == index_size;")
+    if opts.use_offsets:
+        code.append("  return true;")
+    else:
+        code.append("  return dataInd == index_size;")
 
     code.append("}")
 
