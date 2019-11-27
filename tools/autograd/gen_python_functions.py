@@ -393,22 +393,20 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             return arg.get('output', False)
 
         inputs = [arg for arg in declaration['arguments'] if not is_output(arg)]       
-        if hasTO(declaration['arguments']):
-            i = 0
-            dtypeIndex = 0
-            for inp in inputs:
-                if inp['name'] == 'dtype':
-                    dtypeIndex = i
-                else:
-                    i += 1
-                
-                if inp['name'] == 'memory_format':
-                    inputs.remove(inp)
-                    inputs.insert(dtypeIndex, inp)
+        #if hasTO(declaration['arguments']) and False:
+        #    i = 0
+        #    dtypeIndex = 0
+        #    for inp in inputs:
+        #        if inp['name'] == 'dtype':
+        #            dtypeIndex = i
+        #        else:
+        #            i += 1
+        #        
+        #        if inp['name'] == 'memory_format':
+        #            inputs.remove(inp)
+        #            inputs.insert(dtypeIndex, inp)
 
         outputs = [arg for arg in declaration['arguments'] if is_output(arg)]
-
-        #has_tensor_options = any(arg['simple_type'] == 'TensorOptions' for arg in declaration['arguments'])
         has_tensor_options = hasTO(declaration['arguments'])
 
         def get_type_args(args):
@@ -596,6 +594,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         env['unpack_args'] = []
         env['formal_args'] = formal_args
         env['actuals'] = actuals
+
+
 
         if 'call_args' in declaration:
             env['dispatch_args'] = declaration['call_args']
@@ -871,8 +871,10 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['dispatch'].append(emit_dispatch(i, dictionary, env))
 
         env['dispatch'].append('}')
-
         env['traceable'] = 'true' if all(should_trace(d) for d in declarations) else 'false'
+
+        if name == '_empty_affine_quantized':
+            print("\n\n\n FOO: ", env['dispatch'])
 
         if len(declarations) == 1 and len(declarations[0]['args']) == 1 and has_self:
             tmpl = PY_VARIABLE_METHOD_NOARGS
