@@ -18,6 +18,7 @@
 #include <c10/core/StreamGuard.h>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
@@ -46,17 +47,13 @@ static thread_local int worker_device = NO_DEVICE;
 // gradient checkpointing feature only.
 static thread_local bool checkpoint_valid = true;
 
-// XXX: Changes to the way multithreading works in execute should be done with
-// great care. Right now the implementation guarantees that a single function's
-// apply will never be entered concurrently (even if multiple graphs are
-// executed at the same time). Adding multiple threads per-device or removing
-// engine thread affinity to the device can break this invariant, and we depend
-// on it in a few places (e.g. AccumulateGrad function).
-
 // Number of nested reentrant backwards calls currently on this thread
 static thread_local int current_depth = 0;
 // Total nested reentrant backwards calls over all threads for workder_device
 static thread_local int total_depth = 0;
+
+// The timeout (us) that a ReadyQueue pop operation should wait for
+static constexpr int queue_pop_timeout = 10;
 
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
 // Shutdown tasks are first and then empty NodeTask are next.
@@ -89,7 +86,12 @@ struct ReadyQueue {
   // might set this to false.
   void push(NodeTask item, bool incrementOutstandingTasks = true);
   void pushShutdownTask();
-  NodeTask pop();
+
+  // Pop a NodeTask from the ReadyQueue, block thread if queue is empty
+  std::unique_ptr<NodeTask> pop();
+  // Pop a NodeTask from the ReadyQueue within a timeout period, if timeout
+  // then it will return a nullptr instead.
+  std::unique_ptr<NodeTask> pop(const std::chrono::microseconds &timeout);
 };
 
 // Note [Reentrant backwards]
@@ -179,17 +181,33 @@ auto ReadyQueue::pushShutdownTask() -> void {
   not_empty_.notify_one();
 }
 
-auto ReadyQueue::pop() -> NodeTask {
+auto ReadyQueue::pop() -> std::unique_ptr<NodeTask> {
   // Lock mutex for accesses to heap_
   std::unique_lock<std::mutex> lock(mutex_);
   not_empty_.wait(lock, [this]{ return !heap_.empty(); });
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  auto task = std::move(const_cast<NodeTask&>(heap_.top())); heap_.pop();
+  auto task = make_unique<NodeTask>(std::move(const_cast<NodeTask&>(heap_.top())));
+  heap_.pop();
+  return task;
+}
+
+auto ReadyQueue::pop(const std::chrono::microseconds &timeout)
+    -> std::unique_ptr<NodeTask> {
+  // Lock mutex for accesses to heap_
+  std::unique_lock<std::mutex> lock(mutex_);
+  bool success =
+      not_empty_.wait_for(lock, timeout, [this] { return !heap_.empty(); });
+  if (!success) {
+    return nullptr;
+  }
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  auto task = make_unique<NodeTask>(std::move(const_cast<NodeTask &>(heap_.top())));
+  heap_.pop();
   return task;
 }
 
 // This limit is based on the default python recursion limit which is 1000
-Engine::Engine() : max_recursion_depth_(100) {}
+Engine::Engine() : max_recursion_depth_(100), threads_initialized_(false), num_threads_per_device_(1) {}
 
 // Send shutdown tasks to all ReadyQueues if no backward tasks are running
 // Even though readyQueue should be empty, shutdown tasks have the highest
@@ -202,10 +220,21 @@ Engine::~Engine() {
   }
   if (noBackward) {
     for (auto& queue : ready_queues_) {
-     queue->pushShutdownTask();
+      for (size_t i = 0; i < num_threads_per_device_; ++i) {
+        queue->pushShutdownTask();
+      }
     }
   }
   // Othewise threads are leaked
+}
+
+int Engine::get_num_threads_per_device() { return num_threads_per_device_; }
+
+void Engine::set_num_threads_per_device(int num_threads_per_device) {
+  if (threads_initialized_) {
+    throw std::runtime_error("could not set `number_threads_per_device` after the thread pool creation");
+  }
+  num_threads_per_device_ = num_threads_per_device;
 }
 
 void Engine::set_device(int device) {
@@ -277,10 +306,23 @@ auto Engine::thread_main(
   // Why the test on graph_task->outstanding_tasks_?  See
   // Note [Reentrant backwards]
   while (!reentrant_thread || graph_task->outstanding_tasks_ > 0) {
-    NodeTask task = queue->pop();
+    std::unique_ptr<NodeTask> task{nullptr};
+    // If graph_task is not empty, the current thread is reentrant thread
+    if (graph_task) {
+      // For the case where there're more re-entrant threads than outstanding
+      // tasks, then some thread that couldn't grab the task will hang on
+      // trying to pop from readyQueue and hold the mutex_, give a timeout to
+      // pop (return null if timeout) to ensure they don't hang forever
+      task = queue->pop(std::chrono::microseconds(queue_pop_timeout));
+      if (!task) {
+        continue;
+      }
+    } else {
+      task = queue->pop();
+    }
     // This will only work if the worker is running a non backward task
     // TODO Needs to be fixed this to work in all cases
-    if (task.isShutdownTask_) {
+    if (task->isShutdownTask_) {
       C10_LOG_API_USAGE_ONCE("torch.autograd.thread_shutdown");
       break;
     }
@@ -289,51 +331,29 @@ auto Engine::thread_main(
     // The outer graph_task represents the overall graph_task we need to execute
     // for reentrant execution.
     std::shared_ptr<GraphTask> local_graph_task;
-    if (!(local_graph_task = task.base_.lock())) {
+    if (!(local_graph_task = task->base_.lock())) {
       // Reentrant thread's graph task should not expire since we hold a
       // reference to it in this method.
       TORCH_INTERNAL_ASSERT(!reentrant_thread);
-      LOG(INFO) << "GraphTask for function " << task.fn_->name()
+      LOG(INFO) << "GraphTask for function " << task->fn_->name()
                 << " is no longer valid, skipping execution";
       continue;
     }
 
-    if (task.fn_ && !local_graph_task->has_error_.load()) {
+    if (task->fn_ && !local_graph_task->has_error_.load()) {
       GradMode::set_enabled(local_graph_task->grad_mode_);
       try {
-        evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
+        evaluate_function(local_graph_task, task->fn_.get(), task->inputs_);
       } catch (std::exception& e) {
-        thread_on_exception(local_graph_task, task.fn_, e);
+        thread_on_exception(local_graph_task, task->fn_, e);
       }
     }
-    // Notify downstream about the completion of tasks depending
-    // on both where the task was executed, and who owned the overall
-    // graph (in case of reentrant execution.)  See Note [Reentrant backwards].
-    auto base_owner = local_graph_task->owner_;
-    // Task from a non-worker thread. Easy case.
-    if (base_owner == NO_DEVICE) {
-      if (--local_graph_task->outstanding_tasks_ == 0) {
-        // Lock mutex to notify the GraphTask waiting on not_done_
-        std::lock_guard<std::mutex> lock(local_graph_task->mutex_);
-        local_graph_task->not_done_.notify_all();
-      }
-    } else {
-      // If it's a task initiated from this thread, decrease the counter, but
-      // don't do anything - loop condition will do all checks for us next.
-      if (base_owner == worker_device) {
-        --local_graph_task->outstanding_tasks_;
-        // Otherwise send a dummy function task to the owning thread just to
-        // ensure that it's not sleeping. If it has work, it might see that
-        // graph_task->outstanding_tasks_ == 0 before it gets to the task, but
-        // it's a no-op anyway.
-      } else if (base_owner != worker_device) {
-        if (--local_graph_task->outstanding_tasks_ == 0) {
-          // Synchronize outstanding_tasks_ with queue mutex
-          std::atomic_thread_fence(std::memory_order_release);
-          ready_queue_by_index(base_owner)
-              .push(NodeTask(local_graph_task, nullptr, InputBuffer(0)));
-        }
-      }
+
+    // Notify downstream about the completion of tasks
+    if (--local_graph_task->outstanding_tasks_ == 0) {
+      // Lock mutex to notify the GraphTask waiting on not_done_
+      std::lock_guard<std::mutex> lock(local_graph_task->mutex_);
+      local_graph_task->not_done_.notify_all();
     }
   }
 
@@ -847,6 +867,8 @@ auto Engine::ready_queue_by_index(int device_index) -> ReadyQueue& {
 }
 
 auto Engine::start_threads() -> void {
+  // set threads_initialized flag to true to avoid resetting
+  threads_initialized_ = true;
   // See Note [Allocating GPUs to autograd threads]
   c10::DeviceIndex num_devices = 0;
   for (const auto& impl_atomic : c10::impl::device_guard_impl_registry) {
@@ -858,16 +880,18 @@ auto Engine::start_threads() -> void {
 
   // One for CPU, plus one for every GPU device (but colocate GPUs of different
   // types)
-  int num_threads = num_devices + 1;
-  ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_threads);
+  ++num_devices;
+  ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_devices);
   for (auto& queue : ready_queues_)
     queue.reset(new ReadyQueue());
 
   thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
 
-  for (int i = 0; i < num_threads; ++i) {
-    std::thread t(&Engine::thread_init, this, i - 1);
-    t.detach();
+  for (int i = 0; i < num_devices; ++i) {
+    for (size_t j = 0; j < num_threads_per_device_; ++j) {
+      std::thread t(&Engine::thread_init, this, i - 1);
+      t.detach();
+    }
   }
 }
 
