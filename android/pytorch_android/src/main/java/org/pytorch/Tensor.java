@@ -1,5 +1,8 @@
 package org.pytorch;
 
+import com.facebook.jni.annotations.DoNotStrip;
+import com.facebook.jni.HybridData;
+
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -327,6 +330,10 @@ public abstract class Tensor {
     return new Tensor_float64(data, shape);
   }
 
+  @DoNotStrip protected HybridData mHybridData;
+
+  @DoNotStrip private native HybridData initHybrid();
+
   private Tensor(long[] shape) {
     checkShape(shape);
     this.shape = Arrays.copyOf(shape, shape.length);
@@ -437,6 +444,13 @@ public abstract class Tensor {
     private Tensor_uint8(ByteBuffer data, long[] shape) {
       super(shape);
       this.data = data;
+      this.mHybridData = super.initHybrid();
+    }
+
+    private Tensor_uint8(ByteBuffer data, long[] shape, HybridData hybridData) {
+      super(shape);
+      this.data = data;
+      this.mHybridData = hybridData;
     }
 
     @Override
@@ -469,6 +483,13 @@ public abstract class Tensor {
     private Tensor_int8(ByteBuffer data, long[] shape) {
       super(shape);
       this.data = data;
+      this.mHybridData = super.initHybrid();
+    }
+
+    private Tensor_int8(ByteBuffer data, long[] shape, HybridData hybridData) {
+      super(shape);
+      this.data = data;
+      this.mHybridData = hybridData;
     }
 
     @Override
@@ -501,6 +522,13 @@ public abstract class Tensor {
     private Tensor_int32(IntBuffer data, long[] shape) {
       super(shape);
       this.data = data;
+      this.mHybridData = super.initHybrid();
+    }
+
+    private Tensor_int32(IntBuffer data, long[] shape, HybridData hybridData) {
+      super(shape);
+      this.data = data;
+      this.mHybridData = hybridData;
     }
 
     @Override
@@ -533,6 +561,13 @@ public abstract class Tensor {
     Tensor_float32(FloatBuffer data, long[] shape) {
       super(shape);
       this.data = data;
+      this.mHybridData = super.initHybrid();
+    }
+
+    Tensor_float32(FloatBuffer data, long[] shape, HybridData hybridData) {
+      super(shape);
+      this.data = data;
+      this.mHybridData = hybridData;
     }
 
     @Override
@@ -565,6 +600,13 @@ public abstract class Tensor {
     private Tensor_int64(LongBuffer data, long[] shape) {
       super(shape);
       this.data = data;
+      this.mHybridData = super.initHybrid();
+    }
+
+    private Tensor_int64(LongBuffer data, long[] shape, HybridData hybridData) {
+      super(shape);
+      this.data = data;
+      this.mHybridData = hybridData;
     }
 
     @Override
@@ -597,6 +639,13 @@ public abstract class Tensor {
     private Tensor_float64(DoubleBuffer data, long[] shape) {
       super(shape);
       this.data = data;
+      this.mHybridData = super.initHybrid();
+    }
+
+    private Tensor_float64(DoubleBuffer data, long[] shape, HybridData hybridData) {
+      super(shape);
+      this.data = data;
+      this.mHybridData = hybridData;
     }
 
     @Override
@@ -650,19 +699,19 @@ public abstract class Tensor {
   // endregion checks
 
   // Called from native
-  private static Tensor nativeNewTensor(ByteBuffer data, long[] shape, int dtype) {
+  private static Tensor nativeNewTensor(ByteBuffer data, long[] shape, int dtype, HybridData hybridData) {
     if (DType.FLOAT32.jniCode == dtype) {
-      return new Tensor_float32(data.asFloatBuffer(), shape);
+      return new Tensor_float32(data.asFloatBuffer(), shape, hybridData);
     } else if (DType.INT32.jniCode == dtype) {
-      return new Tensor_int32(data.asIntBuffer(), shape);
+      return new Tensor_int32(data.asIntBuffer(), shape, hybridData);
     } else if (DType.INT64.jniCode == dtype) {
-      return new Tensor_int64(data.asLongBuffer(), shape);
+      return new Tensor_int64(data.asLongBuffer(), shape, hybridData);
     } else if (DType.FLOAT64.jniCode == dtype) {
-      return new Tensor_float64(data.asDoubleBuffer(), shape);
+      return new Tensor_float64(data.asDoubleBuffer(), shape, hybridData);
     } else if (DType.UINT8.jniCode == dtype) {
-      return new Tensor_uint8(data, shape);
+      return new Tensor_uint8(data, shape, hybridData);
     } else if (DType.INT8.jniCode == dtype) {
-      return new Tensor_int8(data, shape);
+      return new Tensor_int8(data, shape, hybridData);
     }
     throw new IllegalArgumentException("Unknown Tensor dtype");
   }
