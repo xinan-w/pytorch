@@ -737,8 +737,8 @@ def device_guard(option, dispatch_options, dispatch_tensor):
     if option.get('device_guard', True):
         if dispatch_options:
             if any(arg['type'] == 'c10::optional<ScalarType>' for arg in option['arguments']):
-                return 'auto dev = device.has_value() ? device.value() : Device(kCPU);\nconst DeviceGuard device_guard(dev); // [CHECK THIS]' 
-            else:    
+                return 'auto dev = device.has_value() ? device.value() : Device(kCPU);\nconst DeviceGuard device_guard(dev); // [CHECK THIS]'
+            else:
                 return 'const DeviceGuard device_guard(device); '
         if dispatch_tensor:
             return 'const OptionalDeviceGuard device_guard(device_of({}));'.format(dispatch_tensor)
@@ -992,10 +992,10 @@ def create_generic(top_env, declarations):
                 r.append('layout')
                 r.append('device')
                 r.append('pin_memory')
-            
+
             if formal['dynamic_type'] in ['TensorList'] or is_any_tensor_type(formal):
                 r.append(formal['name'])
-        
+
         if check_if_factory_method(formals):
             r.append('dtype, device, layout, pin_memory')
         return r
@@ -1043,10 +1043,10 @@ def create_generic(top_env, declarations):
         return broadcast_actuals
 
     def collapse_actuals(actuals):
-        collapsed = actuals.copy()
+        collapsed = actuals[:]
         if (any(actual == 'dtype' for actual in actuals) and
             any(actual == 'layout' for actual in actuals) and
-            any(actual == 'device' for actual in actuals) and 
+            any(actual == 'device' for actual in actuals) and
             any(actual == 'pin_memory' for actual in actuals)):
             index = 0
             for i in range(len(collapsed)):
@@ -1064,10 +1064,10 @@ def create_generic(top_env, declarations):
         return collapsed
 
     def collapse_formals(formals):
-        collapsed = formals.copy()
+        collapsed = formals[:]
         if (any(formal == 'c10::optional<ScalarType> dtype' for formal in formals) and
             any(formal == 'c10::optional<Layout> layout' for formal in formals) and
-            any(formal == 'c10::optional<Device> device' for formal in formals) and 
+            any(formal == 'c10::optional<Device> device' for formal in formals) and
             any(formal == 'c10::optional<bool> pin_memory' for formal in formals)):
             index = formals.index('c10::optional<ScalarType> dtype')
 
@@ -1079,7 +1079,7 @@ def create_generic(top_env, declarations):
 
         if (any(formal == 'c10::optional<ScalarType> dtype=c10::nullopt' for formal in formals) and
             any(formal == 'c10::optional<Layout> layout=c10::nullopt' for formal in formals) and
-            any(formal == 'c10::optional<Device> device=c10::nullopt' for formal in formals) and 
+            any(formal == 'c10::optional<Device> device=c10::nullopt' for formal in formals) and
             any(formal == 'c10::optional<bool> pin_memory=c10::nullopt' for formal in formals)):
             index = formals.index('c10::optional<ScalarType> dtype=c10::nullopt')
 
@@ -1091,7 +1091,7 @@ def create_generic(top_env, declarations):
 
         if (any(formal == 'ScalarType dtype' for formal in formals) and
             any(formal == 'Layout layout' for formal in formals) and
-            any(formal == 'Device device' for formal in formals) and 
+            any(formal == 'Device device' for formal in formals) and
             (any(formal == 'bool pin_memory' for formal in formals) or any(formal == 'bool pin_memory=false' for formal in formals))):
             index = formals.index('ScalarType dtype')
 
@@ -1100,14 +1100,14 @@ def create_generic(top_env, declarations):
             collapsed.pop(index)
             collapsed.pop(index)
             collapsed.insert(index, 'const TensorOptions & options')
-        
+
         return collapsed
 
     def collapse_formals_list(formals):
-        collapsed = formals.copy()
-        if (any(formal['type'] == 'c10::optional<ScalarType>' for formal in collapsed) and 
-            any(formal['type'] == 'c10::optional<Layout>' for formal in collapsed) and 
-            any(formal['type'] == 'c10::optional<Device>' for formal in collapsed) and 
+        collapsed = formals[:]
+        if (any(formal['type'] == 'c10::optional<ScalarType>' for formal in collapsed) and
+            any(formal['type'] == 'c10::optional<Layout>' for formal in collapsed) and
+            any(formal['type'] == 'c10::optional<Device>' for formal in collapsed) and
             any(formal['type'] == 'c10::optional<bool>' for formal in collapsed)):
             index = 0
             for i in range(len(collapsed)):
@@ -1121,10 +1121,10 @@ def create_generic(top_env, declarations):
             collapsed.pop(index)
             collapsed.pop(index)
             collapsed.insert(index, {"annotation" : "None", "dynamic_type": "TensorOptions", "is_nullable": "False", "default": "{}", "kwarg_only": "True", "name": "options", "type": "const TensorOptions &", })
-        
-        if (any(formal['type'] == 'ScalarType' for formal in collapsed) and 
-            any(formal['type'] == 'Layout' for formal in collapsed) and 
-            any(formal['type'] == 'Device' for formal in collapsed) and 
+
+        if (any(formal['type'] == 'ScalarType' for formal in collapsed) and
+            any(formal['type'] == 'Layout' for formal in collapsed) and
+            any(formal['type'] == 'Device' for formal in collapsed) and
             any(formal['type'] == 'bool' for formal in collapsed)):
             index = 0
             for i in range(len(collapsed)):
@@ -1162,7 +1162,7 @@ def create_generic(top_env, declarations):
                                     if f['name'] != 'self']
         option['method_formals_with_defaults'] = (
             [formal_with_default(f) for f in formals if f['name'] != 'self'])
-        
+
         # *this is 'const Tensor&' since all Tensor methods are const and must
         # be const_casted to be accepted as native function's non-const argument
         option['method_actuals'] = [
@@ -1304,11 +1304,11 @@ def create_generic(top_env, declarations):
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
         option['formals_with_defaults'] = [formal_with_default(f) for f in formals]
-        
+
         collapsed_formals = collapse_formals_list(formals)
         option['collapsed_formals'] = [format_formal(f) for f in collapsed_formals]
         option['collapsed_formals_with_defaults'] = [formal_with_default(f) for f in collapsed_formals]
-        
+
         option['returns'] = native_get_return_types(option)
         option['return_type'] = format_return_type(option['returns'])
         option['return_call'] = 'return ' if option['return_type'] != 'void' else ''
@@ -1333,7 +1333,7 @@ def create_generic(top_env, declarations):
             f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
 
         option['collapsed_method_actuals'] = collapse_actuals(option['method_actuals'])
-        
+
         def find_formal(formal_name, formals):
             for formal in formals:
                 if formal_name == formal['dynamic_type']:
@@ -1343,7 +1343,7 @@ def create_generic(top_env, declarations):
         def check_tensor_options_in_formals(formals):
             return (any(formal['dynamic_type'] == 'ScalarType' for formal in formals) and
                     any(formal['dynamic_type'] == 'Layout' for formal in formals) and
-                    any(formal['dynamic_type'] == 'Device' for formal in formals) and 
+                    any(formal['dynamic_type'] == 'Device' for formal in formals) and
                     any(formal['dynamic_type'] == 'bool' for formal in formals))
 
         def has_named_tensor_formals(formals):
@@ -1359,7 +1359,7 @@ def create_generic(top_env, declarations):
             option['inferred_type_set'] = 'c10::detail::multi_dispatch_tensor_type_set({})'.format(
                 ', '.join(swizzle_self(t) for t in multidispatch_tensors)
             )
-            
+
             if isinstance(type_method_dispatch, dict):
                 static_dispatch_function_switches = []
                 # NB: As this code is currently written, there will NEVER be
@@ -1408,7 +1408,7 @@ def create_generic(top_env, declarations):
 
         def gen_namespace_function(option, multidispatch_tensors):
             # type: (Any, List[str]) -> FunctionCode
-            
+
             option['inferred_type_set'] = (
                 'c10::detail::multi_dispatch_tensor_type_set({})'.format(', '.join(multidispatch_tensors)))
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
@@ -1448,7 +1448,7 @@ def create_generic(top_env, declarations):
             declaration = DEPRECATED_COLLAPSED_FUNCTION_DECLARATION if option['deprecated'] else COLLAPSED_FUNCTION_DECLARATION
             fn_declaration = declaration.substitute(option)
 
-            expanded_native_actuals = option['collapsed_native_actuals'].copy()
+            expanded_native_actuals = option['collapsed_native_actuals'][:]
             index = expanded_native_actuals.index('options')
             expanded_native_actuals.remove('options')
             expanded_native_actuals.insert(index, 'options.pinned_memory()')
@@ -1458,12 +1458,12 @@ def create_generic(top_env, declarations):
 
             fn_definition = COLLAPSED_FACTORY_DEFINITION.substitute(option, expanded_native_actuals=expanded_native_actuals)
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
-        
+
         def gen_namespace_collapsed_function2(option):
             declaration = NATIVE_DISPATCH_DECLARATION_CONST
             fn_declaration = declaration.substitute(option, type_method_formals=collapse_formals(option['method_formals_with_defaults']))
 
-            expanded_native_actuals = option['collapsed_method_actuals'].copy()
+            expanded_native_actuals = option['collapsed_method_actuals'][:]
             expanded_native_actuals.remove('const_cast<Tensor&>(*this)')
             index = expanded_native_actuals.index('options')
             expanded_native_actuals.remove('options')
@@ -1510,7 +1510,7 @@ def create_generic(top_env, declarations):
         # For method-only entries, the first argument should be self
         if is_method and not is_namespace_function:
             assert formals[0]['name'] == 'self'
-        
+
         check_methods_do_not_start_with_underscore(option['name'], is_method)
 
         option['method_prefix_derived'] = ''
@@ -1582,11 +1582,11 @@ def create_generic(top_env, declarations):
         if is_method:
             code = gen_tensor_method(option, multidispatch_tensors)
             if is_named_tensor_only:
-                code = add_namedtensor_enabled_macro(code)       
+                code = add_namedtensor_enabled_macro(code)
             top_env['tensor_method_declarations'].append(code.declaration)
             top_env['tensor_method_definitions'].append(code.definition)
             method_of.append('Tensor')
-            
+
             if is_factory_method:
                 print("\n\n option: ", option['name'])
                 code = gen_namespace_collapsed_function2(option)
@@ -1602,17 +1602,17 @@ def create_generic(top_env, declarations):
             method_of.append('namespace')
 
             if is_factory_method:
-                # function_definitions and function_declarations are being used for constructing 
+                # function_definitions and function_declarations are being used for constructing
                 # Functions.h which is part of our C++ API. We have to preverse TensorOption here
                 collapsed_multidispatch_tensors = find_multidispatch_tensors(collapsed_formals)
                 collapsed_code = gen_namespace_collapsed_function(option)
-                
+
                 if is_named_tensor_only:
                     collapsed_code = add_namedtensor_enabled_macro(collapsed_code)
 
                 top_env['function_definitions'].append(collapsed_code.definition)
                 top_env['function_declarations'].append(collapsed_code.declaration)
-        
+
         if not BUILD_NAMEDTENSOR and is_named_tensor_only:
             return None
         return OutputDeclaration(
@@ -1639,7 +1639,7 @@ def create_generic(top_env, declarations):
             with_gil=option.get('with_gil', False),
             deprecated=option['deprecated'],
         )
-                
+
     output_declarations = []  # type: List[OutputDeclaration]
     for declaration in declarations:
         output_options = []  # type: List[OutputDeclaration]

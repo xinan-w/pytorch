@@ -220,10 +220,10 @@ def should_generate_python_binding(declaration):
     return True
 
 def collapse_actuals(actuals):
-    collapsed = actuals.copy()
+    collapsed = actuals[:]
     if (any(actual == 'dtype' for actual in actuals) and
         any(actual == 'layout' for actual in actuals) and
-        any(actual == 'device' for actual in actuals) and 
+        any(actual == 'device' for actual in actuals) and
         any(actual == 'pin_memory' for actual in actuals)):
         index = 0
         for i in range(len(collapsed)):
@@ -231,13 +231,13 @@ def collapse_actuals(actuals):
                 break
             else:
                 index += 1
-    
+
         collapsed.pop(index)
         collapsed.pop(index)
         collapsed.pop(index)
         collapsed.pop(index)
         collapsed.insert(index, 'options')
-    
+
     return collapsed
 
 def get_py_variable_methods(declarations):
@@ -392,7 +392,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         def is_output(arg):
             return arg.get('output', False)
 
-        inputs = [arg for arg in declaration['arguments'] if not is_output(arg)]       
+        inputs = [arg for arg in declaration['arguments'] if not is_output(arg)]
         #if hasTO(declaration['arguments']) and False:
         #    i = 0
         #    dtypeIndex = 0
@@ -401,7 +401,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         #            dtypeIndex = i
         #        else:
         #            i += 1
-        #        
+        #
         #        if inp['name'] == 'memory_format':
         #            inputs.remove(inp)
         #            inputs.insert(dtypeIndex, inp)
@@ -500,8 +500,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             arg_idx += 1
 
 
-        if has_tensor_options and check_is_factory_or_like_or_new_function(declaration): 
-            #insert req_grad 
+        if has_tensor_options and check_is_factory_or_like_or_new_function(declaration):
+            #insert req_grad
             added = False
             i = 0
             for f in formal_args:
@@ -512,7 +512,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     break
                 else:
                     i += 1
-            
+
             if not added:
                 formal_args.append('c10::optional<bool> requires_grad')
                 actuals.append('requires_grad')
@@ -581,13 +581,13 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         dtype = parsed_type_args[0] if parsed_type_args else None
         requires_grad_needed = check_is_factory_or_like_or_new_function(declaration)
-        
+
         if has_tensor_options:
             body.append('auto dtype = ' + dtype + ';')
             body.append('auto layout = ' + layout + '.layout;')
             body.append('auto device = ' + device + ';')
             body.append('auto pin_memory = ' + pin_memory + ';')
-            
+
             if requires_grad_needed:
                 body.append("auto requires_grad = " + requires_grad + ";")
 
@@ -610,7 +610,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['dispatch_call'] = '{}::{}'.format(namespace, declaration['name'])
         else:
             raise RuntimeError('could not dispatch, neither namespace function nor Tensor method')
-        
+
         if has_tensor_options:
             env['initialize_cuda'] = 'torch::utils::maybe_initialize_cuda(options);'
             env['dispatch_args'] = collapse_actuals(env['dispatch_args'])
@@ -657,7 +657,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         else:
             body.append(PY_VARIABLE_WRAP.substitute(env, call_dispatch=call_dispatch))
         py_method_dispatch.append(PY_VARIABLE_DISPATCH.substitute(env))
-        
+
         return body
 
     def emit_dispatch(i, dictionary, base_env):
@@ -700,7 +700,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 # this probably won't work if one of the returns is not a tensor, but it will
                 # produce a compile-time error that is obvious
                 has_tensor_return = True
-                
+
         category_override = declaration['category_override']
         is_like_function = name.endswith('_like') or category_override == 'like'
         is_new_function = name.startswith('new_') or category_override == 'new'
@@ -790,7 +790,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'simple_type': 'bool',
             }
             python_binding_arguments.append(pin_memory_arg)
-        
+
         if is_factory_or_like_or_new_function:
             requires_grad_arg = {
                 'default': False,
