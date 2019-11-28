@@ -6259,6 +6259,12 @@ class TestTorchDeviceType(TestCase):
         # self.assertEqual((), torch.normal(zero_d, one_d).shape)
         # self.assertEqual((), torch.normal(1, one_d).shape)
 
+        # convolutions.  Yes, we are testing nn.functional here; seems justified
+        # given its similar to the other tests
+        w = torch.randn(2, 1, 3, 3, device=device).div_(2).requires_grad_()
+        self.assertRaises(RuntimeError, lambda: torch.nn.functional.conv2d(zero_d, w, groups=1))
+        self.assertRaises(RuntimeError, lambda: torch.nn.functional.conv2d(zero_d, w, groups=2))
+
     @onlyCPU
     @dtypes(torch.float)
     def test_diag(self, device, dtype):
